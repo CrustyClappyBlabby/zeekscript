@@ -9,23 +9,22 @@ export {
         ts: time         &log;
         uid: string      &log;
         id: conn_id      &log;
-        category: string &log; # "qos-instability", "metadata-churn", "timing-pattern"
+        category: string &log; 
         details: string  &log;
     };
 
     redef enum Log::ID += { LOG_C2_FUZZY };
 
     # Heuristics - Tunable
-    const min_inter_arrival: interval = 0.5secs &redef; # Ignore rapid bursts
-    const max_unique_keys: count = 3 &redef;            # How many unique keys before we suspect churn?
+    const min_inter_arrival: interval = 0.5secs &redef; 
+    const max_unique_keys: count = 3 &redef;            
 }
 
-# Track state per source IP
 type C2State: record {
     last_pub_ts: time;
-    observed_qos: set[count];     # Track all seen QoS levels
-    observed_keys: set[string];   # Track all seen Property Keys
-    last_delta: interval;         # To compare previous timing interval
+    observed_qos: set[count];     
+    observed_keys: set[string];   
+    last_delta: interval;         
 };
 
 global state_tracker: table[addr] of C2State;
@@ -47,29 +46,23 @@ function log_fuzzy(c: connection, cat: string, det: string)
     ]);
     }
 
-############################################################
-# 1. QoS INSTABILITY
-# Detects any device that can't decide on a single QoS level
-############################################################
-
-event mqtt_publish(c: connection, is_orig: bool, msg_id: count, topic: string, payload: string)
+# FIX: Updated signature to match standard Zeek MQTT analyzer
+event mqtt_publish(c: connection, is_orig: bool, msg_id: count, msg: MQTT::PublishMsg)
     {
     local orig = c$id$orig_h;
-    local current_qos = 0; # Default assumption if unknown, usually extracted from flags if available
     
-    # Initialize state if new
     if ( orig !in state_tracker )
-        state_tracker[orig] = [
-            $last_pub_ts=network_time(), 
-            $observed_qos=set(), 
-            $observed_keys=set(),
-            $last_delta=0secs
-        ];
+        {
+        # FIX: Explicit initialization to avoid "Type Clash" with set()
+        local new_state: C2State;
+        new_state$last_pub_ts = network_time();
+        new_state$observed_qos = set();
+        new_state$observed_keys = set();
+        new_state$last_delta = 0secs;
+        
+        state_tracker[orig] = new_state;
+        }
 
-    # Note: In standard Zeek MQTT, we often infer QoS from handshake or msg_id presence.
-    # We will refine this in the specific QoS events below.
-    
-    # --- TIMING ANALYSIS (Generic) ---
     local now = network_time();
     local delta = now - state_tracker[orig]$last_pub_ts;
     state_tracker[orig]$last_pub_ts = now;
@@ -78,15 +71,13 @@ event mqtt_publish(c: connection, is_orig: bool, msg_id: count, topic: string, p
         {
         local prev = state_tracker[orig]$last_delta;
         
-        # Check for significant distinct shifts in timing (e.g. 2s vs 5s)
-        # We look for a ratio difference > 1.5 to indicate a "mode switch" rather than jitter
         if ( prev > 0.1secs )
             {
             local ratio = (delta > prev) ? (delta / prev) : (prev / delta);
             
-            # If the timing jumped significantly (but is still a regular interval pattern)
             if ( ratio > 1.5 && ratio < 10.0 )
                 {
+                # Note: Using msg$topic or msg$payload is possible here if needed
                 log_fuzzy(c, "timing-pattern", fmt("Interval switched from %.1fs to %.1fs (Ratio: %.1f)", 
                           interval_to_double(prev), interval_to_double(delta), ratio));
                 }
@@ -95,7 +86,6 @@ event mqtt_publish(c: connection, is_orig: bool, msg_id: count, topic: string, p
         }
     }
 
-# Update QoS sets based on ACKs (QoS 1) and COMPs (QoS 2)
 event mqtt_puback(c: connection, is_orig: bool, msg_id: count)
     {
     if ( c$id$orig_h in state_tracker )
@@ -116,11 +106,6 @@ event mqtt_pubcomp(c: connection, is_orig: bool, msg_id: count)
         }
     }
 
-############################################################
-# 2. METADATA CHURN
-# Detects devices that rotate through different property keys
-############################################################
-
 event mqtt_user_property(c: connection, is_orig: bool, msg_id: count, key: string, value: string)
     {
     local orig = c$id$orig_h;
@@ -133,17 +118,13 @@ event mqtt_user_property(c: connection, is_orig: bool, msg_id: count, key: strin
             {
             add state_tracker[orig]$observed_keys[key];
             
-            # If a single device uses too many distinct keys, or specific pairs
             if ( |state_tracker[orig]$observed_keys| >= 2 ) 
                 {
-                # Check if the keys look like "alternatives" (heuristic: same length, common substrings)
-                # This catches trace_id vs span_id without hardcoding them
                 log_fuzzy(c, "metadata-churn", fmt("Device rotating keys. New key: '%s'. Count: %d", 
                           key, |state_tracker[orig]$observed_keys|));
                 }
             }
             
-        # Optional: Detect Low Entropy Values (like "0", "1", "true") in metadata
         if ( |value| <= 1 )
             {
              log_fuzzy(c, "metadata-value", fmt("Suspect low-entropy value in metadata key '%s': '%s'", key, value));
