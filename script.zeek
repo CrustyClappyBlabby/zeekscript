@@ -66,7 +66,7 @@ function log_c2(c: connection, state: C2State, cat: string, ind: string, det: st
     ]);
     }
 
-event mqtt_connect(c: connection, is_orig: bool, client_id: string, proto_name: string, proto_version: count, connect_flags: MQTT::ConnectFlags, keep_alive: count)
+event mqtt_connect(c: connection, is_orig: bool, client_id: string, proto_name: string, proto_version: count, connect_flags: MQTT::Connect_Flags, keep_alive: count)
     {
     local orig_h = c$id$orig_h;
     if ( orig_h !in state_tracker )
@@ -143,7 +143,7 @@ event mqtt_publish(c: connection, is_orig: bool, msg_id: count, msg: MQTT::Publi
             # Channel 3a: Key Rotation (e.g., trace_id vs span_id)
             add state$header_keys[key];
             if ( |state$header_keys| >= 2 )
-                 log_c2(c, state, "Covert Header", "Key Rotation",
+                 log_c2(c, state, "Covert Header - Key Rotation", "Key Rotation",
                        fmt("Client is rotating UserProperty keys. Seen keys: %s", state$header_keys),
                        0.9);
 
@@ -153,7 +153,7 @@ event mqtt_publish(c: connection, is_orig: bool, msg_id: count, msg: MQTT::Publi
 
             add state$header_values[key][val];
             if ( |state$header_values[key]| >= 2 )
-                log_c2(c, state, "Covert Header", "Value Fluctuation",
+                log_c2(c, state, "Covert Header - Value Fluctuation", "Value Fluctuation",
                       fmt("Client is alternating values for key '%s'. Seen values: %s", key, state$header_values[key]),
                       0.9);
             }
