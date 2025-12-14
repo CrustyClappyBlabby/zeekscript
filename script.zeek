@@ -27,7 +27,7 @@ type C2State: record {
     last_delta: interval;         
 };
 
-global state_tracker: table[addr] of C2State;
+global state_tracker: table[addr] of C2State &read_expire=5mins;
 
 event zeek_init()
     {
