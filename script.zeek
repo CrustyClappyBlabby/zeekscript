@@ -66,13 +66,13 @@ function log_c2(c: connection, state: C2State, cat: string, ind: string, det: st
     ]);
     }
 
-event mqtt_connect(c: connection, is_orig: bool, msg: MQTT::ConnectMsg)
+event mqtt_connect(c: connection, is_orig: bool, client_id: string, proto_name: string, proto_version: count, connect_flags: MQTT::ConnectFlags, keep_alive: count)
     {
     local orig_h = c$id$orig_h;
     if ( orig_h !in state_tracker )
         {
         state_tracker[orig_h] = [
-            $client_id = msg$client_id,
+            $client_id = client_id,
             $last_pub_ts = 0.0,
             $last_alert = table(),
             $qos_levels = set(),
@@ -83,7 +83,7 @@ event mqtt_connect(c: connection, is_orig: bool, msg: MQTT::ConnectMsg)
         }
     else
         {
-        state_tracker[orig_h]$client_id = msg$client_id;
+        state_tracker[orig_h]$client_id = client_id;
         }
     }
 
